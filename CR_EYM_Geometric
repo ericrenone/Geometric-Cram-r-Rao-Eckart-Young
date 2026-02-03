@@ -1,0 +1,340 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Cramér-Rao Bound ↔ Eckart–Young–Mirsky Geometric Unification Demo
+=================================================================
+
+Educational / research single-file artifact demonstrating the deep geometric
+connection between:
+
+  • Cramér-Rao Bound (multivariate Gaussian mean estimation)
+  • Eckart–Young–Mirsky theorem (optimal low-rank matrix approximation)
+
+Intended use:
+  - Advanced statistics / information geometry / numerical linear algebra teaching
+
+Features:
+  • Publication-quality plots with consistent style
+  • Reproducible via explicit seed control
+  • Safe file handling & directory creation
+  • Input validation & helpful error messages
+  • Rectangular matrices in SVD example (realistic setting)
+  • Modern Python (type hints, pathlib, f-strings, context-aware logging)
+
+Outputs (saved in --output-dir):
+  • crb_ellipse.png      MLE scatter plot + 95% CRB confidence ellipse
+  • svd_spectrum.png     Singular value spectrum + truncation point
+
+Example invocations:
+    python crb_ey_demo.py --run-all --output-dir=figures
+    python crb_ey_demo.py --crb --dim=6 --samples=5000 --trials=2000 --seed=42
+    python crb_ey_demo.py --svd --rows=200 --cols=80 --true-rank=15 --keep-rank=6 --noise=1.1
+    python crb_ey_demo.py --test
+"""
+
+from __future__ import annotations
+
+import argparse
+import logging
+from pathlib import Path
+from typing import Tuple
+
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.patches import Ellipse
+from scipy.stats import chi2
+
+
+# =============================================================================
+#  Logging & Plotting Style
+# =============================================================================
+
+def configure_logging() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s  %(levelname)-7s  %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+
+def set_publication_style() -> None:
+    """Apply clean, high-quality style suitable for academic publications."""
+    plt.style.use("default")
+    plt.rcParams.update(
+        {
+            "figure.dpi": 160,
+            "savefig.dpi": 300,
+            "font.size": 11,
+            "axes.titlesize": 13,
+            "axes.labelsize": 11.5,
+            "xtick.labelsize": 10,
+            "ytick.labelsize": 10,
+            "legend.fontsize": 10.5,
+            "legend.framealpha": 0.94,
+            "grid.linestyle": ":",
+            "grid.alpha": 0.4,
+            "axes.formatter.useoffset": False,
+            "figure.constrained_layout.use": True,
+        }
+    )
+
+
+def save_figure(fig: plt.Figure, path: Path) -> None:
+    """Save figure with proper directory creation and logging."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, bbox_inches="tight", dpi=300)
+    plt.close(fig)
+    logging.info(f"Figure saved: {path}")
+
+
+# =============================================================================
+#  Core Simulations
+# =============================================================================
+
+
+def run_cramer_rao_simulation(
+    dim: int,
+    n_samples: int,
+    n_trials: int,
+    seed: int,
+    output_dir: Path,
+    reg: float = 1e-8,
+) -> None:
+    """
+    Simulate maximum likelihood estimation of multivariate Gaussian mean
+    and visualize the empirical distribution together with the 95% Cramér-Rao
+    confidence ellipse.
+    """
+    if dim < 1:
+        raise ValueError("Dimension must be at least 1")
+    if n_samples < 20:
+        raise ValueError("Too few samples per trial for reliable mean estimate")
+    if n_trials < 100:
+        raise ValueError("Too few trials for meaningful scatter plot")
+
+    np.random.seed(seed)
+    true_mean = np.zeros(dim)
+
+    estimates = np.empty((n_trials, dim))
+    for i in range(n_trials):
+        X = np.random.randn(n_samples, dim) + true_mean
+        estimates[i] = np.mean(X, axis=0)
+
+    cov_empirical = np.cov(estimates, rowvar=False)
+
+    # Fisher information matrix (known identity covariance)
+    fisher = n_samples * np.eye(dim)
+    fisher_reg = fisher + max(reg, reg * n_samples) * np.eye(dim)
+    crb_cov = np.linalg.inv(fisher_reg)
+
+    logging.info(
+        f"CRB simulation | dim={dim}  samples/trial={n_samples}  "
+        f"trials={n_trials}  seed={seed}"
+    )
+    logging.info(f"Empirical covariance (top-left 3×3):\n{np.round(cov_empirical[:3,:3], 5)}")
+    logging.info(f"CRB covariance    (top-left 3×3):\n{np.round(crb_cov[:3,:3], 5)}")
+
+    if dim < 2:
+        logging.info("Skipping ellipse plot (requires dim ≥ 2)")
+        return
+
+    set_publication_style()
+    fig, ax = plt.subplots(figsize=(6.4, 6.4))
+
+    ax.scatter(
+        estimates[:, 0],
+        estimates[:, 1],
+        s=10,
+        alpha=0.60,
+        lw=0,
+        rasterized=True,
+        color="C0",
+        label="MLE samples",
+    )
+
+    # 95% confidence ellipse
+    scale = chi2.ppf(0.95, df=dim)
+    vals, vecs = np.linalg.eigh(crb_cov * scale)
+    angle_deg = np.degrees(np.arctan2(vecs[1, 0], vecs[0, 0]))
+
+    ellipse = Ellipse(
+        xy=true_mean[:2],
+        width=2 * np.sqrt(vals[0]),
+        height=2 * np.sqrt(vals[1]),
+        angle=angle_deg,
+        facecolor="none",
+        edgecolor="#d62728",
+        linewidth=1.9,
+        alpha=0.92,
+        label="95% CRB ellipse",
+    )
+    ax.add_patch(ellipse)
+
+    ax.plot(*true_mean[:2], "k*", ms=14, label="True mean")
+    ax.set_xlabel(r"$\hat{\mu}_1$")
+    ax.set_ylabel(r"$\hat{\mu}_2$")
+    ax.set_title("MLE distribution vs Cramér-Rao 95% confidence ellipse")
+    ax.grid(True)
+    ax.legend()
+    ax.set_aspect("equal")
+
+    save_figure(fig, output_dir / "crb_ellipse.png")
+
+
+def run_lowrank_svd_simulation(
+    rows: int,
+    cols: int,
+    true_rank: int,
+    keep_rank: int,
+    noise_std: float,
+    seed: int,
+    output_dir: Path,
+) -> None:
+    """
+    Generate a noisy low-rank matrix, compute its SVD,
+    and visualize the singular value spectrum with chosen truncation point.
+    """
+    if true_rank < 1 or keep_rank < 1:
+        raise ValueError("Ranks must be positive integers")
+    if max(rows, cols) < true_rank:
+        raise ValueError("Matrix dimensions too small for desired true rank")
+
+    np.random.seed(seed)
+
+    # Generate clean low-rank matrix
+    s_true = np.linspace(20, 4, true_rank) ** 1.15
+    U, _ = np.linalg.qr(np.random.randn(rows, true_rank))
+    Vh, _ = np.linalg.qr(np.random.randn(true_rank, cols))
+    signal = U @ np.diag(s_true) @ Vh
+
+    # Add noise
+    data = signal + noise_std * np.random.randn(rows, cols)
+
+    # Full SVD
+    U_s, s_s, Vh_s = np.linalg.svd(data, full_matrices=False)
+
+    # Truncated reconstruction error
+    k = keep_rank
+    recon = U_s[:, :k] @ np.diag(s_s[:k]) @ Vh_s[:k, :]
+    err_frob = np.linalg.norm(data - recon, "fro")
+    tail_energy = np.sqrt(np.sum(s_s[k:] ** 2))
+
+    logging.info(
+        f"SVD low-rank demo | {rows}×{cols}  true rank={true_rank}  "
+        f"keep={keep_rank}  noise std={noise_std:.2f}  seed={seed}"
+    )
+    logging.info(f"  Frobenius reconstruction error = {err_frob: .4f}")
+    logging.info(f"  Eckart-Young tail bound       = {tail_energy: .4f}")
+    logging.info(f"  error / bound ratio           = {err_frob / tail_energy: .4f}")
+
+    set_publication_style()
+    fig, ax = plt.subplots(figsize=(8.2, 4.8))
+
+    n_sing = len(s_s)
+    indices = np.arange(1, n_sing + 1)
+    ax.bar(indices, s_s, width=0.82, color="C0", alpha=0.86, label="Singular values")
+
+    ax.axvline(k + 0.5, color="#a02c2c", ls="--", lw=1.8, alpha=0.9,
+               label=f"truncation rank = {k}")
+
+    ax.set_yscale("log")
+    ax.set_xlabel("Singular value index")
+    ax.set_ylabel(r"$\sigma_i$  (log scale)")
+    ax.set_title("Singular value spectrum of noisy low-rank matrix")
+    ax.grid(True, axis="y")
+    ax.legend()
+
+    save_figure(fig, output_dir / "svd_spectrum.png")
+
+
+# =============================================================================
+#  CLI & Execution Flow
+# =============================================================================
+
+
+def parse_arguments() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Cramér-Rao Bound ↔ Eckart–Young–Mirsky geometric unification demo",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="See file docstring for mathematical background and motivation.",
+    )
+
+    modes = parser.add_mutually_exclusive_group(required=True)
+    modes.add_argument("--run-all", action="store_true", help="run both simulations")
+    modes.add_argument("--crb", action="store_true", help="run only CRB simulation")
+    modes.add_argument("--svd", action="store_true", help="run only SVD simulation")
+    modes.add_argument("--test", action="store_true", help="quick smoke test")
+
+    parser.add_argument(
+        "--seed", type=int, default=20260203, help="random seed for reproducibility"
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("results"),
+        help="directory where plots will be saved",
+    )
+
+    # CRB parameters
+    crb = parser.add_argument_group("CRB parameters")
+    crb.add_argument("--dim", type=int, default=2, help="dimension of mean vector")
+    crb.add_argument("--samples", type=int, default=2000, help="samples per trial")
+    crb.add_argument("--trials", type=int, default=1200, help="number of trials")
+
+    # SVD parameters
+    svd = parser.add_argument_group("SVD / low-rank parameters")
+    svd.add_argument("--rows", type=int, default=80, help="matrix rows")
+    svd.add_argument("--cols", type=int, default=120, help="matrix columns")
+    svd.add_argument("--true-rank", type=int, default=10, help="intrinsic rank")
+    svd.add_argument("--keep-rank", type=int, default=4, help="truncation rank")
+    svd.add_argument("--noise", type=float, default=0.75, help="noise standard deviation")
+
+    return parser.parse_args()
+
+
+def main() -> None:
+    configure_logging()
+    args = parse_arguments()
+
+    if args.test:
+        logging.info("Running quick smoke test …")
+        outdir = Path("test_results")
+        run_cramer_rao_simulation(2, 500, 100, 12345, outdir)
+        run_lowrank_svd_simulation(40, 70, 6, 3, 0.6, 54321, outdir)
+        logging.info("Smoke test completed.")
+        return
+
+    set_publication_style()
+
+    if args.run_all or args.crb:
+        run_cramer_rao_simulation(
+            dim=args.dim,
+            n_samples=args.samples,
+            n_trials=args.trials,
+            seed=args.seed,
+            output_dir=args.output_dir,
+        )
+
+    if args.run_all or args.svd:
+        # Slight seed offset so the two simulations are not using identical RNG state
+        run_lowrank_svd_simulation(
+            rows=args.rows,
+            cols=args.cols,
+            true_rank=args.true_rank,
+            keep_rank=args.keep_rank,
+            noise_std=args.noise,
+            seed=args.seed + 1,
+            output_dir=args.output_dir,
+        )
+
+    logging.info(f"Finished. All plots saved in:  {args.output_dir.resolve()}")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        logging.warning("Interrupted by user.")
+    except Exception as e:
+        logging.error(f"Execution failed: {e}", exc_info=True)
+        raise SystemExit(1)
