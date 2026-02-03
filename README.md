@@ -7,8 +7,6 @@
 
 This script serves as a compact, reproducible, publication-quality teaching and research tool connecting **information geometry**, **statistical estimation**, and **matrix approximation theory**.
 
-![CRB ellipse example](results/crb_ellipse.png)  
-![SVD spectrum example](results/svd_spectrum.png)
 
 ## Core Idea in One Sentence
 
