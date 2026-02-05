@@ -15,17 +15,7 @@ Features:
  • Command-line configurable
  • Informative logging
 
-Outputs (saved in ./results/ or chosen folder):
- • crb_ellipse.png     → MLE scatter + 95% CRB confidence ellipse
- • svd_spectrum.png    → Singular value spectrum + truncation line
 
-Usage:
-    python crb_eym_demo.py
-    python crb_eym_demo.py --eym-noise-std 1.2 --eym-keep-rank 6
-    python crb_eym_demo.py --help
-
-Author: Eric Ren (2026)
-License: MIT
 """
 
 import argparse
