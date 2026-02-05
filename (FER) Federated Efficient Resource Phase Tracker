@@ -121,3 +121,4 @@ ax_map.set_title(fr"FER PHASE TRACKER | COORDINATE SYSTEM: $\Theta$" + f"\nSEED:
 ani = animation.FuncAnimation(fig, update, frames=FRAMES, interval=INTERVAL, blit=True)
 plt.tight_layout()
 plt.show()
+
